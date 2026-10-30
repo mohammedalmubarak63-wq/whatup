@@ -1,0 +1,114 @@
+import os
+import re
+from docx import Document
+
+class WhatsAppQAExtractorAgent:
+    def __init__(self, input_txt_path, output_docx_path):
+        self.input_txt_path = input_txt_path
+        self.output_docx_path = output_docx_path
+
+    def read_chat_file(self):
+        """قراءة ملف المحادثة مع التعامل مع الترميزات المختلفة"""
+        try:
+            with open(self.input_txt_path, 'r', encoding='utf-8') as f:
+                return f.readlines()
+        except UnicodeDecodeError:
+            with open(self.input_txt_path, 'r', encoding='latin-1') as f:
+                return f.readlines()
+
+    def parse_whatsapp_messages(self, lines):
+        """تصفية وفصل رسائل الواتساب عن التواريخ وأسماء المرسلين"""
+        messages = []
+        # نمط متوافق مع أنماط تصدير واتساب الشائعة (تاريخ، وقت، اسم، نص)
+        pattern = re.compile(r'^\[?(\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}),?\s*[\d:]+\s*(?:ص|م|AM|PM)?\]?\s*-?\s*([^:]+):\s*(.*)')
+        
+        for line in lines:
+            match = pattern.match(line.strip())
+            if match:
+                date, sender, text = match.groups()
+                messages.append({"sender": sender.strip(), "text": text.strip()})
+            else:
+                if messages and line.strip():
+                    messages[-1]["text"] += "\n" + line.strip()
+        return messages
+
+    def intelligent_extract_qa(self, messages):
+        """الذكاء في استخراج الأسئلة والأجوبة مع الالتزام الحرفي بالنص"""
+        qa_pairs = []
+        i = 0
+        while i < len(messages) - 1:
+            current_msg = messages[i]['text']
+            
+            # التحقق مما إذا كان النص سؤالاً
+            is_question = '؟' in current_msg or '?' in current_msg or any(current_msg.startswith(w) for w in ['هل', 'ما', 'من', 'كيف', 'متى', 'أين', 'لماذا', 'كم'])
+            
+            if is_question:
+                question_text = current_msg
+                answer_text = ""
+                
+                j = i + 1
+                while j < len(messages):
+                    next_msg = messages[j]['text']
+                    if '؟' in next_msg or '?' in next_msg:
+                        break
+                    answer_text += ("\n" + next_msg) if answer_text else next_msg
+                    if j == i + 1:  # أخذ الرد المباشر
+                        break
+                    j += 1
+                
+                if answer_text:
+                    qa_pairs.append({
+                        "question": question_text,
+                        "answer": answer_text.strip()
+                    })
+            i += 1
+        return qa_pairs
+
+    def create_formatted_word(self, qa_pairs):
+        """إنشاء وتنسيق ملف الوورد باحترافية"""
+        doc = Document()
+        
+        # عنوان المستند الرئيسي
+        doc.add_heading('تقرير الأسئلة والأجوبة المستخرجة من محادثات الواتساب', level=0)
+        
+        if not qa_pairs:
+            doc.add_paragraph('لم يتم العثور على أزواج أسئلة وأجوبة مطابقة بالمعايير.')
+        
+        for idx, qa in enumerate(qa_pairs, 1):
+            q_heading = doc.add_paragraph()
+            q_run = q_heading.add_run(f"س {idx}: {qa['question']}")
+            q_run.bold = True
+            
+            a_paragraph = doc.add_paragraph()
+            a_run = a_paragraph.add_run(f"ج: {qa['answer']}")
+            
+            doc.add_paragraph('--------------------------------------------------')
+
+        doc.save(self.output_docx_path)
+        print(f"✅ تم حفظ ملف الوورد بنجاح في: {self.output_docx_path}")
+
+    def run(self):
+        if not os.path.exists(self.input_txt_path):
+            print(f"❌ خطأ: لم يتم العثور على الملف {self.input_txt_path}")
+            return
+            
+        print("📂 جاري قراءة الملف...")
+        lines = self.read_chat_file()
+        
+        print("🔍 جاري تحليل وفلترة الرسائل...")
+        messages = self.parse_whatsapp_messages(lines)
+        
+        print("🧠 جاري استخراج الأسئلة والأجوبة بذكاء...")
+        qa_pairs = self.intelligent_extract_qa(messages)
+        
+        print(f"📊 تم العثور على {len(qa_pairs)} سؤال وجواب. جاري إنشاء ملف الوورد...")
+        self.create_formatted_word(qa_pairs)
+        print("🎉 تمت العملية بنجاح!")
+
+if __name__ == "__main__":
+    # اسم ملف المحادثة الافتراضي، يمكنك تغييره حسب اسم ملفك
+    input_file = "_chat.txt"
+    output_file = "extracted_qa.docx"
+    
+    agent = WhatsAppQAExtractorAgent(input_txt_path=input_file, output_docx_path=output_file)
+    agent.run()
